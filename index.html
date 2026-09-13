@@ -136,7 +136,7 @@
       outMonthly.textContent = outYearly.textContent = outTax.textContent = '—';
       return;
     }
-    const monthly = round2(a * r);
+    const monthly = Math.ceil(a * r); // до целого в большую сторону
     const yearly = round2(p + monthly);
     const tax = round2(monthly * 0.01);
     current = { date: date.value, usd: a, rate: r, prev: p, monthly, yearly, tax };
