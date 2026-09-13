@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Грузинские налоги</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1a1d21; --muted: #6b7280;
+    --border: #e2e5ea; --accent: #2563eb; --accent-text: #ffffff;
+    --result-bg: #f0f4ff; --error: #b91c1c; --ok: #15803d;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1b1f25; --text: #e6e8eb; --muted: #9aa3ad;
+      --border: #2c323a; --accent: #3b82f6; --result-bg: #1e2a44;
+      --error: #f87171; --ok: #4ade80;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 24px 16px;
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: .95rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  label { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 4px; }
+  .field { margin-bottom: 16px; }
+  .field:last-child { margin-bottom: 0; }
+  input {
+    width: 100%; font: inherit; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row input { flex: 1; }
+  button {
+    font: inherit; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--card); color: var(--text); cursor: pointer; white-space: nowrap;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .6; cursor: default; }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: 4px; min-height: 1.2em; }
+  .hint.error { color: var(--error); }
+  .hint.ok { color: var(--ok); }
+  .results { background: var(--result-bg); }
+  .results dl { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 10px 16px; }
+  .results dt { color: var(--muted); }
+  .results dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  .results dd.big { font-size: 1.35rem; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+  footer { color: var(--muted); font-size: .8rem; margin-top: 24px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Грузинские налоги</h1>
+  <p class="sub">Расчёт налога 1% для ИП со статусом малого бизнеса. Курс USD/GEL берётся с сайта Национального банка Грузии.</p>
+
+  <section class="card">
+    <div class="field">
+      <label for="usd">Сумма за месяц, USD</label>
+      <input id="usd" type="number" inputmode="decimal" min="0" step="0.01" placeholder="например 3000">
+    </div>
+    <div class="field">
+      <label for="date">Дата получения</label>
+      <input id="date" type="date">
+    </div>
+    <div class="field">
+      <label for="prev">Предыдущий годовой набегающий доход, GEL</label>
+      <input id="prev" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0">
+    </div>
+    <div class="field">
+      <label for="rate">Курс USD → GEL на дату</label>
+      <div class="row">
+        <input id="rate" type="number" inputmode="decimal" min="0" step="0.0001" placeholder="загружается…">
+        <button id="fetchBtn" type="button">Обновить курс</button>
+      </div>
+      <div id="rateHint" class="hint"></div>
+    </div>
+  </section>
+
+  <section class="card results">
+    <dl>
+      <dt>Курс</dt><dd id="outRate">—</dd>
+      <dt>Месячный доход, GEL</dt><dd id="outMonthly">—</dd>
+      <dt>Годовой набегающий доход, GEL</dt><dd id="outYearly">—</dd>
+      <dt>Налог 1%, GEL</dt><dd id="outTax" class="big">—</dd>
+    </dl>
+    <div class="actions">
+      <button id="copyBtn" type="button" class="primary">Скопировать расчёт</button>
+      <button id="carryBtn" type="button" title="Подставить годовой набегающий доход в поле «Предыдущий»">Перенести в «Предыдущий»</button>
+    </div>
+    <div id="copyHint" class="hint"></div>
+  </section>
+
+  <footer>
+    Источник курса: <a href="https://nbg.gov.ge/" target="_blank" rel="noopener">nbg.gov.ge</a>.
+    Введённые значения сохраняются в браузере.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const usd = $('usd'), date = $('date'), prev = $('prev'), rate = $('rate');
+  const rateHint = $('rateHint'), fetchBtn = $('fetchBtn');
+  const outRate = $('outRate'), outMonthly = $('outMonthly'), outYearly = $('outYearly'), outTax = $('outTax');
+  const copyBtn = $('copyBtn'), carryBtn = $('carryBtn'), copyHint = $('copyHint');
+
+  const STORAGE_KEY = 'ge_taxes_state';
+  const fmt = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtRate = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+
+  // Округление до копеек (тетри)
+  const round2 = (n) => Math.round((n + Number.EPSILON) * 100) / 100;
+  const num = (el) => { const v = parseFloat(el.value); return Number.isFinite(v) ? v : 0; };
+  const todayISO = () => new Date().toISOString().slice(0, 10);
+
+  let lastFetchedDate = null;
+  let current = null;
+
+  function calc() {
+    const r = num(rate), a = num(usd), p = num(prev);
+    if (!(r > 0) || !(a > 0)) {
+      current = null;
+      outRate.textContent = r > 0 ? fmtRate.format(r) : '—';
+      outMonthly.textContent = outYearly.textContent = outTax.textContent = '—';
+      return;
+    }
+    const monthly = round2(a * r);
+    const yearly = round2(p + monthly);
+    const tax = round2(monthly * 0.01);
+    current = { date: date.value, usd: a, rate: r, prev: p, monthly, yearly, tax };
+    outRate.textContent = fmtRate.format(r);
+    outMonthly.textContent = fmt.format(monthly);
+    outYearly.textContent = fmt.format(yearly);
+    outTax.textContent = fmt.format(tax);
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        usd: usd.value, date: date.value, prev: prev.value, rate: rate.value,
+      }));
+    } catch (_) {}
+  }
+
+  function load() {
+    try {
+      const s = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      if (s.usd) usd.value = s.usd;
+      if (s.prev) prev.value = s.prev;
+      if (s.rate) rate.value = s.rate;
+      date.value = s.date || todayISO();
+    } catch (_) { date.value = todayISO(); }
+  }
+
+  function setHint(el, text, cls) {
+    el.textContent = text;
+    el.className = 'hint' + (cls ? ' ' + cls : '');
+  }
+
+  async function fetchRate(force) {
+    const d = date.value;
+    if (!d) { setHint(rateHint, 'Укажите дату', 'error'); return; }
+    if (!force && d === lastFetchedDate) return;
+    fetchBtn.disabled = true;
+    setHint(rateHint, 'Загрузка курса НБГ…');
+    try {
+      const url = `https://nbg.gov.ge/gw/api/ct/monetarypolicy/currencies/en/json/?currencies=USD&date=${encodeURIComponent(d)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const cur = data?.[0]?.currencies?.find((c) => c.code === 'USD');
+      if (!cur || !(cur.rate > 0)) throw new Error('USD не найден в ответе');
+      const perOne = cur.rate / (cur.quantity || 1);
+      rate.value = perOne.toFixed(4);
+      lastFetchedDate = d;
+      const valid = (cur.validFromDate || data[0].date || '').slice(0, 10);
+      setHint(rateHint, `Курс НБГ ${fmtRate.format(perOne)} GEL за 1 USD, действует с ${valid}`, 'ok');
+      calc(); save();
+    } catch (e) {
+      setHint(rateHint, `Не удалось получить курс: ${e.message}. Введите вручную.`, 'error');
+    } finally {
+      fetchBtn.disabled = false;
+    }
+  }
+
+  function buildReport() {
+    if (!current) return '';
+    const c = current;
+    return [
+      `Дата: ${c.date}`,
+      `Сумма: ${fmt.format(c.usd)} USD`,
+      `Курс НБГ: ${fmtRate.format(c.rate)} GEL/USD`,
+      `Месячный доход: ${fmt.format(c.monthly)} GEL`,
+      `Предыдущий набегающий доход: ${fmt.format(c.prev)} GEL`,
+      `Годовой набегающий доход: ${fmt.format(c.yearly)} GEL`,
+      `Налог 1%: ${fmt.format(c.tax)} GEL`,
+    ].join('\n');
+  }
+
+  copyBtn.addEventListener('click', async () => {
+    const text = buildReport();
+    if (!text) { setHint(copyHint, 'Сначала заполните сумму и курс', 'error'); return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      setHint(copyHint, 'Скопировано', 'ok');
+    } catch (_) {
+      setHint(copyHint, 'Буфер обмена недоступен', 'error');
+    }
+    setTimeout(() => setHint(copyHint, ''), 2000);
+  });
+
+  carryBtn.addEventListener('click', () => {
+    if (!current) return;
+    prev.value = current.yearly.toFixed(2);
+    calc(); save();
+  });
+
+  [usd, prev, rate].forEach((el) => el.addEventListener('input', () => { calc(); save(); }));
+  date.addEventListener('change', () => { save(); fetchRate(false); });
+  fetchBtn.addEventListener('click', () => fetchRate(true));
+
+  load();
+  calc();
+  fetchRate(true);
+})();
+</script>
+</body>
+</html>
